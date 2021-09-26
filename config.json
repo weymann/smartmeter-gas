@@ -1,0 +1,14 @@
+{
+    "device_value_idle" : 5000,
+    "device_value_hysteresis" : 3000,
+    "mqtt_server" : "whereever.youwant.com",
+    "mqtt_port" : 8883,
+    "mqtt_user" : "user",
+    "mqtt_pwd" : "password",
+    "mqtt_topic" : "home/smartmeter/gas",
+    "cert_location" : "/etc/ssl/certs/ca-certificates.crt",
+    "z_number" : 0.955,
+    "heating_value" : 10.308,
+    "gas_price" : 0.0578,
+    "gas_fee_month" : 6
+}
