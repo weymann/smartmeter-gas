@@ -29,11 +29,6 @@ openhab_access = 0
 state = "init"
 loop_counter = 1
 loop_time = 60
-gas_meter_total = 0
-gas_meter_year = 0
-gas_meter_month = 0
-gas_meter_day = 0
-gas_meter_minute = 0
 read_success = 0
 read_fail = 0
 success_rate = 0.0
@@ -66,37 +61,30 @@ def publish():
     #global price_claculation
     global mqtt_connected
     global mqtt_topic
-    log("Publish Connected? "+str(mqtt_connected))
+    # log("Publish Connected? "+str(mqtt_connected))
     if not(mqtt_connected):
         mqtt_connect()
            	
     mqtt_client.publish(mqtt_topic+"/timestamp",datetime.now().strftime("%d/%m/%y %H:%M:%S"))
-    mqtt_client.publish(mqtt_topic+"/total",gas_meter_total)
-    data_json["total"] = gas_meter_total
-    mqtt_client.publish(mqtt_topic+"/day",gas_meter_day)
-    data_json["day"] = gas_meter_day
-    mqtt_client.publish(mqtt_topic+"/month",gas_meter_month)
-    data_json["month"] = gas_meter_month
-    mqtt_client.publish(mqtt_topic+"/year",gas_meter_year)
-    data_json["year"] = gas_meter_year
-    mqtt_client.publish(mqtt_topic+"/minute",gas_meter_minute)
-    mqtt_client.publish(mqtt_topic+"/success",success_rate)
+    mqtt_client.publish(mqtt_topic+"/success-rate",success_rate)
+    mqtt_client.publish(mqtt_topic+"/total",data_json["total"])
+    mqtt_client.publish(mqtt_topic+"/day/count", data_json["day"]["count"])
+    mqtt_client.publish(mqtt_topic+"/month/count",data_json["month"]["count"])
+    mqtt_client.publish(mqtt_topic+"/year/count",data_json["year"]["count"])
     data_json["sucess_rate"] = success_rate
     if kwh_calculation :
-        mqtt_client.publish(mqtt_topic+"/total-kwh",gas_meter_total * kwh_factor)
-        mqtt_client.publish(mqtt_topic+"/day-kwh",gas_meter_day * kwh_factor)
-        mqtt_client.publish(mqtt_topic+"/month-kwh",gas_meter_month * kwh_factor)
-        mqtt_client.publish(mqtt_topic+"/year-kwh",gas_meter_year * kwh_factor)
+        mqtt_client.publish(mqtt_topic+"/day/kwh", round(data_json["day"]["count"] * kwh_factor,3))
+        mqtt_client.publish(mqtt_topic+"/month/kwh", round(data_json["month"]["count"] * kwh_factor,3))
+        mqtt_client.publish(mqtt_topic+"/year/kwh", round(data_json["year"]["count"] * kwh_factor,3))
     
     if price_calculation :
-        mqtt_client.publish(mqtt_topic+"/total-price",gas_meter_total * price_factor)
-        mqtt_client.publish(mqtt_topic+"/day-price",gas_meter_day * price_factor)
+        mqtt_client.publish(mqtt_topic+"/day/price", round(data_json["day"]["count"] * price_factor,2))
         if config_json["gas_fee_month"] :
-            mqtt_client.publish(mqtt_topic+"/month-price",gas_meter_month * price_factor + config_json["gas_fee_month"])
-            mqtt_client.publish(mqtt_topic+"/year-price",gas_meter_year * price_factor + config_json["gas_fee_month"] * last_sensor_date.month)
+            mqtt_client.publish(mqtt_topic+"/month/price", round(data_json["month"]["count"] * price_factor + config_json["gas_fee_month"],2))
+            mqtt_client.publish(mqtt_topic+"/year/price", round(data_json["year"]["count"] * price_factor + config_json["gas_fee_month"] * last_sensor_date.month,2))
         else :
-            mqtt_client.publish(mqtt_topic+"/month-price",gas_meter_month * price_factor)
-            mqtt_client.publish(mqtt_topic+"/year-price",gas_meter_year * price_factor)
+            mqtt_client.publish(mqtt_topic+"/month/price", round(data_json["month"]["count"] * price_factor,2))
+            mqtt_client.publish(mqtt_topic+"/year/price", round(data_json["year"]["count"] * price_factor,2))
 
 # log message towards systemd (started as service) plus command line (started manually)
 def log(message):
@@ -106,12 +94,19 @@ def log(message):
 	#print(current_time + " : " + message)
 
 def on_connect(client, userdata, flags, rc):
-	if rc == 0:
-		global mqtt_connected
-		mqtt_connected = True
-		log("Connected to MQTT Broker! " + str(mqtt_connected))
-	else:
-		log("Failed to connect, return code %d\n", rc)
+    if rc == 0:
+        global mqtt_connected
+        mqtt_connected = True
+        log("Connected to MQTT Broker! " + str(mqtt_connected))
+        # Publish config parameters which can be modified
+        if kwh_calculation:
+            mqtt_client.publish(mqtt_topic+"/config/heating-value", config_json["heating_value"])
+            mqtt_client.publish(mqtt_topic+"/config/z-number", config_json["z_number"])
+        if price_calculation :
+            mqtt_client.publish(mqtt_topic+"/config/gas-price",config_json["gas_price"])
+            mqtt_client.publish(mqtt_topic+"/config/gas-fee",config_json["gas_fee_month"])
+    else:
+        log("Failed to connect, return code %d\n", rc)
 
 def on_disconnect(client, userdata, flags, rc):
 		global mqtt_connected
@@ -158,14 +153,11 @@ else :
     log("No kwh calculation")
     
 log(config_json)
+ 
 
 # Read stored data file with last stored values
 data_file = open(execution_path+"/data.json", "r")
 data_json = json.loads(data_file.read())
-gas_meter_total = data_json["total"]
-gas_meter_month = data_json["month"]
-gas_meter_year = data_json["year"]
-gas_meter_day = data_json["day"]
 log(data_json)
 
 # set values for device driver
@@ -176,7 +168,7 @@ hysteresis = config_json["device_value_hysteresis"]
 # MQTT Client setup
 mqtt_topic = config_json["mqtt_topic"]
 #mqtt_client.on_log = on_log
-mqtt_client.on_publish = on_publish
+#mqtt_client.on_publish = on_publish
 mqtt_client.on_connect = on_connect
 mqtt_client.on_disconnect = on_disconnect
 
@@ -219,11 +211,10 @@ try :
                     if(ticks_between > tick_idle_interval):
                         state = "count"
                         log("Count start at " + str(m))
-                        gas_meter_minute += 10
-                        gas_meter_day += 10
-                        gas_meter_month += 10
-                        gas_meter_year += 10
-                        gas_meter_total += 10
+                        data_json["day"]["count"] += 10
+                        data_json["month"]["count"] += 10
+                        data_json["year"]["count"] += 10
+                        data_json["total"] += 10
                         last_count_tick = ticks
                     else:
                         log("Reject count due to short timeframe " + str(ticks_between))
@@ -239,20 +230,41 @@ try :
             read_fail += 1 
                          
         if loop_counter >= loop_time:
-    		# check each minute for new day / month / year
+    		# check for new day / month / year
             tod = datetime.today().date()
             if(last_sensor_date.day != tod.day) :
                 log("Day Switch")
-                gas_meter_day = 0
+                mqtt_client.publish(mqtt_topic+"/yesterday/count", data_json["day"]["count"])
+                if kwh_calculation :
+                    mqtt_client.publish(mqtt_topic+"/yesterday/kwh", round(data_json["day"]["count"] * kwh_factor,3))
+                    if price_calculation :
+                        mqtt_client.publish(mqtt_topic+"/yesterday/price", round(data_json["day"]["count"] * price_factor,2))
+                data_json["day"]["count"] = 0
+                
                 # day reset of success counter
                 read_fail = 0
                 read_success = 0
                 if(last_sensor_date.month != tod.month) :
                     log("Month Switch")
-                    gas_meter_month = 0
+                    mqtt_client.publish(mqtt_topic+"/previous-month/count", data_json["month"]["count"])
+                    if kwh_calculation :
+                        mqtt_client.publish(mqtt_topic+"/previous-month/kwh", round(data_json["month"]["count"] * kwh_factor,3))
+                        if price_calculation :
+                            mqtt_client.publish(mqtt_topic+"/previous-month/price", round(data_json["month"]["count"] * price_factor,2))
+                    data_json["month"]["count"] = 0
+                    
                     if(last_sensor_date.year != tod.year) :
                         log("Year Switch")
-                        gas_meter_month = 0
+                        mqtt_client.publish(mqtt_topic+"/previous-year/count", data_json["year"]["count"])
+                        if kwh_calculation :
+                            mqtt_client.publish(mqtt_topic+"/previous-year/kwh", round(data_json["year"]["count"] * kwh_factor,3))
+                            if price_calculation :
+                                mqtt_client.publish(mqtt_topic+"/previous-year/price", round(data_json["year"]["count"] * price_factor,2))
+                        data_json["year"]["count"] = 0
+
+                with open(execution_path+"/data.json", 'w') as json_file:
+                    json.dump(data_json, json_file)
+            
             last_sensor_date = datetime.today().date()
             if read_success == 0:
                 success_rate = 0.0
@@ -260,9 +272,7 @@ try :
                 success_rate = round(100.0 - (float(read_fail) * 100 / float(read_success)),1)
     
             publish()
-    		# reset loop counter and minutely consumption
             loop_counter = 1
-            gas_meter_minute = 0
     	# increase loop counter and sleep
         loop_counter = loop_counter + read_interval
         time.sleep(read_interval)
@@ -275,7 +285,6 @@ except Exception as e:
 finally :
     log("final exit")
     running = False
-    f = open(execution_path+"/data.json", "w")
-    f.write(json.dumps(data_json))
-    f.close()   
+    with open(execution_path+"/data.json", 'w') as json_file:
+        json.dump(data_json, json_file)
     
