@@ -4,15 +4,16 @@ import py_qmc5883l
 import paho.mqtt.client as mqtt
 import paho.mqtt.publish as publish
 import ssl
-import time
 import json
 import asyncio
 import background
 import logging
 import os
 import sys
+import time
 from datetime import datetime
 from datetime import date
+from calendar import monthrange
 from systemd.journal import JournaldLogHandler
 
 # Needed dependency:
@@ -31,15 +32,16 @@ loop_counter = 1
 loop_time = 60
 read_success = 0
 read_fail = 0
-running = False
+success_rate = 0.0
+execution_path = ""
 mqtt_connected = False
 mqtt_client = mqtt.Client(client_id='', clean_session=True, userdata=None, protocol=mqtt.MQTTv311, transport="tcp")
 mqtt_topic = ""
-smartmeter_data = "{}"
 kwh_calculation = False
 kwh_factor = 0
 price_calculation = False
 price_factor = 0
+days_in_month = 0
 
 logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))# get an instance of the logger object this module will use
 
@@ -64,7 +66,7 @@ def publish():
     if not(mqtt_connected):
         mqtt_connect()
            	
-    mqtt_client.publish(mqtt_topic+"/timestamp",datetime.now().strftime("%d/%m/%y %H:%M:%S"),2,True)
+    mqtt_client.publish(mqtt_topic+"/timestamp",datetime.now().isoformat(),2,True)
     mqtt_client.publish(mqtt_topic+"/success-rate",data_json["sucess_rate"],2,True)
     mqtt_client.publish(mqtt_topic+"/total", data_json["total"],2,True)
     mqtt_client.publish(mqtt_topic+"/day/count", data_json["day"]["count"],2,True)
@@ -76,18 +78,20 @@ def publish():
         mqtt_client.publish(mqtt_topic+"/year/kwh", round(data_json["year"]["count"] * kwh_factor,3),2,True)
     
     if price_calculation :
-        mqtt_client.publish(mqtt_topic+"/day/price", round(data_json["day"]["count"] * price_factor,2))
         if config_json["gas_fee_month"] :
+            # breakdown gas fee to daily share
+            mqtt_client.publish(mqtt_topic+"/day/price", round(data_json["day"]["count"] * price_factor + config_json["gas_fee_month"] / days_in_month,2))
             mqtt_client.publish(mqtt_topic+"/month/price", round(data_json["month"]["count"] * price_factor + config_json["gas_fee_month"],2),2,True)
             mqtt_client.publish(mqtt_topic+"/year/price", round(data_json["year"]["count"] * price_factor + config_json["gas_fee_month"] * last_sensor_date.month,2),2,True)
         else :
+            mqtt_client.publish(mqtt_topic+"/day/price", round(data_json["day"]["count"] * price_factor,2))
             mqtt_client.publish(mqtt_topic+"/month/price", round(data_json["month"]["count"] * price_factor,2),2,True)
             mqtt_client.publish(mqtt_topic+"/year/price", round(data_json["year"]["count"] * price_factor,2),2,True)
 
 @background.task
 def write_data():
     # write data file for persistent storage
-    log("Write data file")
+    log("Write data file "+execution_path)
     with open(execution_path+"/data.json", 'w') as json_file:
         json.dump(data_json, json_file)
         
@@ -133,7 +137,6 @@ def on_publish(client,userdata,result):
 last_sensor_date = datetime.today().date()
 
 # Read config file
-execution_path = ""
 file_path = __file__.split("/")
 length = len(file_path)-1
 for i in range(length):
@@ -151,6 +154,8 @@ if kwh_calculation :
     price_calculation = "gas_price" in config_json
     if price_calculation :
         price_factor = kwh_factor * config_json["gas_price"]
+        now = datetime.today().date()
+        days_in_month = monthrange(now.year, now.month)[1]
         log("Price Factor " + str(price_factor))
     else :
         log("No price calculation")
@@ -203,9 +208,9 @@ while sensor_init == 0:
 ticks = 0
 last_count_tick = -10
 try :
+    counter_changed = False
     while True:
         try:
-            counter_changed = False
             m = sensor.get_data()
             read_success += 1
             ticks += 1
@@ -258,6 +263,7 @@ try :
                         mqtt_client.publish(mqtt_topic+"/previous-month/kwh", round(data_json["month"]["count"] * kwh_factor,3),2,True)
                         if price_calculation :
                             mqtt_client.publish(mqtt_topic+"/previous-month/price", round(data_json["month"]["count"] * price_factor,2),2,True)
+                    days_in_month = monthrange(tod.year, tod.month)[1]
                     data_json["month"]["count"] = 0
                     
                     if(last_sensor_date.year != tod.year) :
@@ -276,8 +282,9 @@ try :
                 data_json["sucess_rate"] = round(100.0 - (float(read_fail) * 100 / float(read_success)),1)
     
             if counter_changed :
-                counter_changed = False
+                log("Write data request")
                 write_data()
+                counter_changed = False
             else :
                 log("Nothing changed")
             publish()
