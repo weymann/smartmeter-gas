@@ -33,7 +33,7 @@ read_fail = 0
 success_rate = 0.0
 execution_path = ""
 mqtt_connected = False
-mqtt_client = mqtt.Client(client_id='', clean_session=True, userdata=None, protocol=mqtt.MQTTv311, transport="tcp")
+mqtt_client = mqtt.Client(client_id='SmartmeterGas', clean_session=True, userdata=None, protocol=mqtt.MQTTv311, transport="tcp")
 mqtt_topic = ""
 kwh_calculation = False
 kwh_factor = 0
@@ -46,19 +46,18 @@ logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))# get an instance o
 
 def mqtt_connect():
   log("MQTT Client connect")
-  connectionResult = mqtt_client.connect(config_json["mqtt_server"],config_json["mqtt_port"])
+  mqtt_client.connect(config_json["mqtt_server"],config_json["mqtt_port"])
 
 def publish():
-    #global price_claculation
-    global mqtt_connected
-    global mqtt_topic
-    log("Publish Connected? "+str(mqtt_connected)+", Total: " + str(data_json["total"]))
+    # log("Publish Connected? "+str(mqtt_connected)+", Total: " + str(data_json["total"]))
     if not(mqtt_connected):
         mqtt_connect()
            	
     mqtt_client.publish(mqtt_topic+"/timestamp",datetime.now().isoformat(),2,True)
     mqtt_client.publish(mqtt_topic+"/success-rate",data_json["sucess_rate"],2,True)
-    mqtt_client.publish(mqtt_topic+"/total", data_json["total"],2,True)
+    # pick total counter publish as total reult for this function
+    # if it fails try to reconnect
+    tc_result = mqtt_client.publish(mqtt_topic+"/total", data_json["total"],2,True)
     mqtt_client.publish(mqtt_topic+"/day/count", data_json["day"]["count"],2,True)
     mqtt_client.publish(mqtt_topic+"/month/count",data_json["month"]["count"],2,True)
     mqtt_client.publish(mqtt_topic+"/year/count",data_json["year"]["count"],2,True)
@@ -66,18 +65,20 @@ def publish():
         mqtt_client.publish(mqtt_topic+"/day/kwh", round(data_json["day"]["count"] * kwh_factor,3),2,True)
         mqtt_client.publish(mqtt_topic+"/month/kwh", round(data_json["month"]["count"] * kwh_factor,3),2,True)
         mqtt_client.publish(mqtt_topic+"/year/kwh", round(data_json["year"]["count"] * kwh_factor,3),2,True)
-        # for year split price into heating water circle (hwc), heating circle (hc) and fees
-        hwc_baseload = last_sensor_date.month * data_json["hwc-baseload"]
-        hc_load = data_json["year"]["count"] - hwc_baseload
-        mqtt_client.publish(mqtt_topic+"/year/kwh-hwc", round(hwc_baseload * kwh_factor,3),2,True)
-        mqtt_client.publish(mqtt_topic+"/year/kwh-hc", round(hc_load * kwh_factor,3),2,True)
+        # EXPERIMENTAL: for year split price into heating water circle (hwc), heating circle (hc) and fees
+        if data_json["hwc-baseload"]:
+            hwc_baseload = last_sensor_date.month * data_json["hwc-baseload"]
+            hc_load = data_json["year"]["count"] - hwc_baseload
+            mqtt_client.publish(mqtt_topic+"/year/kwh-hwc", round(hwc_baseload * kwh_factor,3),2,True)
+            mqtt_client.publish(mqtt_topic+"/year/kwh-hc", round(hc_load * kwh_factor,3),2,True)
     
     if price_calculation :
-        # for year split price into heating water circle (hwc), heating circle (hc) and fees
-        hwc_baseload = last_sensor_date.month * data_json["hwc-baseload"]
-        hc_load = data_json["year"]["count"] - hwc_baseload
-        mqtt_client.publish(mqtt_topic+"/year/price-hwc", round(hwc_baseload * price_factor,2),2,True)
-        mqtt_client.publish(mqtt_topic+"/year/price-hc", round(hc_load * price_factor,2),2,True)
+        # EXPERIMENTAL: for year split price into heating water circle (hwc), heating circle (hc) and fees
+        if data_json["hwc-baseload"]:
+            hwc_baseload = last_sensor_date.month * data_json["hwc-baseload"]
+            hc_load = data_json["year"]["count"] - hwc_baseload
+            mqtt_client.publish(mqtt_topic+"/year/price-hwc", round(hwc_baseload * price_factor,2),2,True)
+            mqtt_client.publish(mqtt_topic+"/year/price-hc", round(hc_load * price_factor,2),2,True)
         if config_json["gas_fee_month"] :
             # breakdown gas fee to daily share
             mqtt_client.publish(mqtt_topic+"/day/price", round(data_json["day"]["count"] * price_factor + config_json["gas_fee_month"] / days_in_month,2))
@@ -88,7 +89,10 @@ def publish():
             mqtt_client.publish(mqtt_topic+"/day/price", round(data_json["day"]["count"] * price_factor,2))
             mqtt_client.publish(mqtt_topic+"/month/price", round(data_json["month"]["count"] * price_factor,2),2,True)
             mqtt_client.publish(mqtt_topic+"/year/price", round(data_json["year"]["count"] * price_factor,2),2,True)
+    
+    return tc_result[0]
 
+# write current measured data into file
 @background.task
 def write_data():
     # write data file for persistent storage
@@ -97,6 +101,7 @@ def write_data():
     with open(data_file, 'w') as json_file:
         json.dump(data_json, json_file)
         
+# write configuration into file
 @background.task
 def write_config():
     # write data file for persistent storage
@@ -108,9 +113,6 @@ def write_config():
 # log message towards systemd (started as service) plus command line (started manually)
 def log(message):
 	logging.info(message)
-	#now = datetime.now()
-	#current_time = now.strftime("%d/%m/%y %H:%M:%S")
-	#print(current_time + " : " + message)
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
@@ -128,16 +130,13 @@ def on_connect(client, userdata, flags, rc):
         # subscribe for changes of total counter and config
         mqtt_client.subscribe(mqtt_topic+"/total", qos=0)
         mqtt_client.subscribe(mqtt_topic+"/config/#", qos=0)
-        #mqtt_client.subscribe(mqtt_topic+"/config/z-number", qos=0)
-        #mqtt_client.subscribe(mqtt_topic+"/config/gas-price", qos=0)
-        #mqtt_client.subscribe(mqtt_topic+"/config/gas-fee", qos=0)
         
     else:
         log("Failed to connect, return code %d\n", rc)
 
 def on_disconnect(client, userdata, flags, rc):
-		global mqtt_connected
-		mqtt_connected = False
+	global mqtt_connected
+	mqtt_connected = False
 
 def on_log(client, userdata, level, buf):
     logging.info(buf)
@@ -156,8 +155,7 @@ def on_message(client, userdata, message):
             data_json["day"]["count"] += delta
             data_json["month"]["count"] += delta
             data_json["year"]["count"] += delta
-        # else:
-        #    log("Received same total count")
+            write_data()
     elif message.topic.startswith(mqtt_topic+"/config") :
         try:
             value = float(payload)
@@ -181,10 +179,6 @@ def on_message(client, userdata, message):
                 log("Topic "+message.topic+" not found in config")
         except ValueError:
             log("Payload "+payload+" isn't a number value")
-
-def on_publish(client,userdata,result):
-    log("data published "+str(result))
-    pass
 
 def on_subscribe(client, userdata, mid, granted_qos):
     log("subscribe feedback "+str(mid))
@@ -269,7 +263,6 @@ lower_bound = config_json["device_lower_bound"]
 # MQTT Client setup
 mqtt_topic = config_json["mqtt_topic"]
 #mqtt_client.on_log = on_log
-#mqtt_client.on_publish = on_publish
 mqtt_client.on_connect = on_connect
 mqtt_client.on_disconnect = on_disconnect
 mqtt_client.on_message = on_message
@@ -365,12 +358,14 @@ try :
                 data_json["sucess_rate"] = round(100.0 - (float(read_fail) * 100 / float(read_success)),1)
     
             if counter_changed :
-                log("Write data request")
                 write_data()
                 counter_changed = False
-            else :
-                log("Nothing changed")
-            publish()
+
+            # in case of unsuccessful publish try to reconnect
+            publish_result = publish() 
+            if publish_result != 0:
+                log("Publish failed "+str(publish_result))
+                mqtt_connect()
             loop_counter = 1
     	# increase loop counter and sleep
         loop_counter = loop_counter + read_interval
