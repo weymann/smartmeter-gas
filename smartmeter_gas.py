@@ -16,9 +16,6 @@ from datetime import date
 from calendar import monthrange
 from systemd.journal import JournaldLogHandler
 
-# Needed dependency:
-# https://github.com/RigacciOrg/py-qmc5883l
-
 host = ""
 token = ''
 upper_bound = 0
@@ -47,15 +44,6 @@ days_in_month = 0
 logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))# get an instance of the logger object this module will use
 
 
-@background.task
-def mqtt_loop():
-    mqtt_client.loop_start()
-    #while running:
-    #    mqtt_client.loop()
-    #    time.sleep(1)
-        
-
-@background.task
 def mqtt_connect():
   log("MQTT Client connect")
   connectionResult = mqtt_client.connect(config_json["mqtt_server"],config_json["mqtt_port"])
@@ -171,7 +159,6 @@ def sensor_initialization():
 		    sensor = py_qmc5883l.QMC5883L(output_range=py_qmc5883l.RNG_8G)
 		    sensor_init = 1
 		    log("Sensor init done")
-		    # print("Sensor init done")
 	    except OSError as error:
 		    log(error)
 		    time.sleep(5)
@@ -257,8 +244,7 @@ if config_json["cert_location"] :
     mqtt_client.tls_set(config_json["cert_location"], tls_version=ssl.PROTOCOL_TLS)
 
 # start event loop in background task and connect client
-running = True
-mqtt_loop()
+mqtt_client.loop_start()
 mqtt_connect()
 
 sensor = sensor_initialization()
@@ -359,10 +345,8 @@ except Exception as e:
 # in case of fall through to this point: stop event loop and write current data into file
 finally :
     log("final exit")
-    running = False
     mqtt_client.loop_stop()
     
 log("normal exit")
-running = False
 mqtt_client.loop_stop()
 
