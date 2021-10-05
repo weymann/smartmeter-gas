@@ -57,7 +57,6 @@ def mqtt_connect():
   log("MQTT Client connect")
   connectionResult = mqtt_client.connect(config_json["mqtt_server"],config_json["mqtt_port"])
 
-@background.task
 def publish():
     #global price_claculation
     global mqtt_connected
@@ -76,13 +75,24 @@ def publish():
         mqtt_client.publish(mqtt_topic+"/day/kwh", round(data_json["day"]["count"] * kwh_factor,3),2,True)
         mqtt_client.publish(mqtt_topic+"/month/kwh", round(data_json["month"]["count"] * kwh_factor,3),2,True)
         mqtt_client.publish(mqtt_topic+"/year/kwh", round(data_json["year"]["count"] * kwh_factor,3),2,True)
+        # for year split price into heating water circle (hwc), heating circle (hc) and fees
+        hwc_baseload = last_sensor_date.month * data_json["hwc-baseload"]
+        hc_load = data_json["year"]["count"] - hwc_baseload
+        mqtt_client.publish(mqtt_topic+"/year/kwh-hwc", round(hwc_baseload * kwh_factor,3),2,True)
+        mqtt_client.publish(mqtt_topic+"/year/kwh-hc", round(hc_load * kwh_factor,3),2,True)
     
     if price_calculation :
+        # for year split price into heating water circle (hwc), heating circle (hc) and fees
+        hwc_baseload = last_sensor_date.month * data_json["hwc-baseload"]
+        hc_load = data_json["year"]["count"] - hwc_baseload
+        mqtt_client.publish(mqtt_topic+"/year/price-hwc", round(hwc_baseload * price_factor,2),2,True)
+        mqtt_client.publish(mqtt_topic+"/year/price-hc", round(hc_load * price_factor,2),2,True)
         if config_json["gas_fee_month"] :
             # breakdown gas fee to daily share
             mqtt_client.publish(mqtt_topic+"/day/price", round(data_json["day"]["count"] * price_factor + config_json["gas_fee_month"] / days_in_month,2))
             mqtt_client.publish(mqtt_topic+"/month/price", round(data_json["month"]["count"] * price_factor + config_json["gas_fee_month"],2),2,True)
             mqtt_client.publish(mqtt_topic+"/year/price", round(data_json["year"]["count"] * price_factor + config_json["gas_fee_month"] * last_sensor_date.month,2),2,True)
+            mqtt_client.publish(mqtt_topic+"/year/fees", round(config_json["gas_fee_month"] * last_sensor_date.month,2),2,True)
         else :
             mqtt_client.publish(mqtt_topic+"/day/price", round(data_json["day"]["count"] * price_factor,2))
             mqtt_client.publish(mqtt_topic+"/month/price", round(data_json["month"]["count"] * price_factor,2),2,True)
