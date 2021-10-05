@@ -92,10 +92,19 @@ def publish():
 @background.task
 def write_data():
     # write data file for persistent storage
-    log("Write data file "+execution_path)
-    with open(execution_path+"/data.json", 'w') as json_file:
+    data_file = execution_path+"/data.json"
+    log("Write data file "+data_file)
+    with open(data_file, 'w') as json_file:
         json.dump(data_json, json_file)
         
+@background.task
+def write_config():
+    # write data file for persistent storage
+    config_file = execution_path+"/config.json"
+    log("Write config file " + config_file)
+    with open(config_file, 'w') as json_file:
+        json.dump(config_json, json_file)
+
 # log message towards systemd (started as service) plus command line (started manually)
 def log(message):
 	logging.info(message)
@@ -115,8 +124,14 @@ def on_connect(client, userdata, flags, rc):
         if price_calculation :
             mqtt_client.publish(mqtt_topic+"/config/gas-price",config_json["gas_price"],2,True)
             mqtt_client.publish(mqtt_topic+"/config/gas-fee",config_json["gas_fee_month"],2,True)
-        subres = mqtt_client.subscribe(mqtt_topic+"/total", qos=0)
-        log("Subsrciption result "+str(subres))
+
+        # subscribe for changes of total counter and config
+        mqtt_client.subscribe(mqtt_topic+"/total", qos=0)
+        mqtt_client.subscribe(mqtt_topic+"/config/#", qos=0)
+        #mqtt_client.subscribe(mqtt_topic+"/config/z-number", qos=0)
+        #mqtt_client.subscribe(mqtt_topic+"/config/gas-price", qos=0)
+        #mqtt_client.subscribe(mqtt_topic+"/config/gas-fee", qos=0)
+        
     else:
         log("Failed to connect, return code %d\n", rc)
 
@@ -130,8 +145,9 @@ def on_log(client, userdata, level, buf):
 #define callbacks
 def on_message(client, userdata, message):
     payload = str(message.payload.decode("utf-8"))
-    log("message received  " + payload +" topic" + message.topic)
-    if(message.topic == mqtt_topic+"/total"):
+    # log("message received  " + payload +" topic" + message.topic)
+    if message.topic == mqtt_topic+"/total" :
+        # adapt all values according new current counter setting
         total_counter_received = int(payload)
         if(total_counter_received != data_json["total"]):
             delta = total_counter_received - data_json["total"]
@@ -140,9 +156,31 @@ def on_message(client, userdata, message):
             data_json["day"]["count"] += delta
             data_json["month"]["count"] += delta
             data_json["year"]["count"] += delta
-        else:
-            log("Received same total count")
-    
+        # else:
+        #    log("Received same total count")
+    elif message.topic.startswith(mqtt_topic+"/config") :
+        try:
+            value = float(payload)
+            if message.topic == mqtt_topic+"/config/heating-value":
+                if config_json["heating_value"] != value:
+                    config_json["heating_value"] = value
+                    write_config()
+            elif message.topic == mqtt_topic+"/config/z-number":
+                if config_json["z_number"] != value:
+                    config_json["z_number"] = value
+                    write_config()
+            elif message.topic == mqtt_topic+"/config/gas-price":
+                if config_json["gas_price"] != value:
+                    config_json["gas_price"] = value
+                    write_config()
+            elif message.topic == mqtt_topic+"/config/gas-fee":
+                if config_json["gas_fee_month"] != value:
+                    config_json["gas_fee_month"] = value
+                    write_config()
+            else:
+                log("Topic "+message.topic+" not found in config")
+        except ValueError:
+            log("Payload "+payload+" isn't a number value")
 
 def on_publish(client,userdata,result):
     log("data published "+str(result))
