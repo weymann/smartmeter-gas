@@ -1,7 +1,8 @@
 {
-    "device_value_idle" : 5000,
-    "device_value_hysteresis" : 3000,
-    "mqtt_server" : "whereever.youwant.com",
+    "device_measure_field" : 0,
+    "device_upper_bound" : 0,
+    "device_lower_bound" : -3000,
+    "mqtt_server" : "where.youwant.com",
     "mqtt_port" : 8883,
     "mqtt_user" : "user",
     "mqtt_pwd" : "password",
