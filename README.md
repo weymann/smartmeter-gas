@@ -2,6 +2,8 @@
 
 If you have an *old-style* gasmeter to measure gas consumption it's still possible to turn it into s smart device.
 
+<img src="./doc/gas-measure.png" style="margin-right: 10px;width: 640px;" />
+
 ## Pre-conditions
 
 * basic solder skills
@@ -50,6 +52,13 @@ Install the needed python modules to enable hardware access plus distributing da
 * [QMC5883L python driver](https://github.com/RigacciOrg/py-qmc5883l)
 * [Paho MQTT](https://www.eclipse.org/paho/index.php?page=clients/python/index.php) for data distribution 
 
+Check if dependencies are solved with a quick call
+
+```
+smartmeter_gas.py help
+```
+
+
 ### Configuration
 
 Stored in json file in the same directoy as the python script. Basically three sections needs to be configured:
@@ -58,8 +67,9 @@ Stored in json file in the same directoy as the python script. Basically three s
 * some technical data from your gas bill to calculate kwh consumption and pricing 
 ```
 {
-    "device_value_idle" : 5000,
-    "device_value_hysteresis" : 3000,
+    "device_measure_field" : 0,
+    "device_upper_bound" : 0,
+    "device_lower_bound" : -3000,
     "mqtt_server" : "whereever.youwant.com",
     "mqtt_port" : 8883,
     "mqtt_user" : "user",
@@ -73,12 +83,46 @@ Stored in json file in the same directoy as the python script. Basically three s
 }
 ```
 
+#### Device
+
+Figure out your device settings running the script with parameter *setup*
+
+```
+smartmeter_gas.py setup
+```
+
+Each second a log output is given with the current measured values. Find a time slot when gas is consumed. The example in the picture below is showing the changes during consumption - values are going down from approx *1000* to *-4000*. If you record such a cycle you can derive your config
+* ```device_measure_field``` - column of the desired measurement (green)
+* ```device_upper_bound``` - value to enter state *count* (blue)
+* ```device_lower_bound``` - value to exit state *count* (orange)
+
+<img src="./doc/device-config.png" style="margin-right: 10px;width: 640px;" />
+
+#### Kwh / Price
+
+In order to calculate kwh consumption and a corresponding price take your latest bill. You should find the *z-number* and *heating value* somewhere. If this isn't declared leave it to the already defined values in config json. It's a fair assumption: 1 m<sup>3</sup> ~ 10 kwh.
+
+Pricing should be found in your bill. Prices in the below german example are ex vat so you need add the tax rate in order to get the paying price.
+
+<img src="./doc/price-config.png" style="margin-right: 10px;width: 640px;" />
+
+#### MQTT
+
+You should be aware of your mqtt settings. 
+If not encrypted change the ```mqtt_port``` to 1883 and leave the ```cert_location``` empty. 
+If even anonymous is allowed leave ```mqtt_user``` and ```mqtt_pwd``` empty.
+
 ### Check Data
 
-<img src="./doc/MQTTExplorer.png" style="float: right; margin-right: 10px;" />
+I use [MQTT Explorer](http://mqtt-explorer.com/) to check my IoT devices. You'll see the current values in the left tree and on the right side history for the selected topic is found.
 
+<img src="./doc/MQTTExplorer.png" style="margin-right: 10px;width: 640px;" />
 
-I use [MQTT Explorer](http://mqtt-explorer.com/) to check my IoT devices.
+### Data / Config Changes 
+
+The kwh and price values of the configuration can be changed with a simple *publish* call e.g. using the [MQTT Explorer](http://mqtt-explorer.com/). So if you receiv a new bill adapt the new values and publish them - no software restart necessary.
+
+It's also possible due to some miscounting or device errors the reported total counter and the *real* measured counter diverges. From time to time please check manually the counter. If the number from this smartmeter doesn't match simply publish the correct counter value - no software restart necessary.
 
 # Going further
 
@@ -86,4 +130,4 @@ Great! You turned an old fashioned gas meter which needs to be checked manually 
 
 Use now your data and put it into your favorite Smarthome Software. I use [openHAB](https://www.openhab.org/) which provides the capability to receive MQTT data.
 
-<img src="./doc/openHAB-Panel.png" style="float: right; margin-right: 10px;" />
+<img src="./doc/openHAB-Panel.png" style=" margin-right: 10px;width: 640px;" />
