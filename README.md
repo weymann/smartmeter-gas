@@ -1,6 +1,6 @@
-# Smart Gasmeter
+# Smartmeter Gas
 
-If you have an *old-style* gasmeter to measure gas consumption it's still possible to turn it into s smart device.
+If you have an *old-style* gasmeter to measure gas consumption it's still possible to turn it into a smart device.
 
 <img src="./doc/gas-measure.png" style="margin-right: 10px;width: 640px;" />
 
@@ -40,7 +40,7 @@ python3 --version
 ```
 returns a valid result you're fine. Otherwise [follow the install instructions](https://docs.python-guide.org/starting/install3/linux/)
 
-Now clone the repo to your desired directory
+Now switch to your desired directory and clone the repo 
 ```
 git clone https://github.com/weymann/smartmeter-gas.git
 ```
