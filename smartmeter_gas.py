@@ -21,9 +21,10 @@ from systemd.journal import JournaldLogHandler
 
 host = ""
 token = ''
-normal = 0
-hysteresis = 0
+upper_bound = 0
+lower_bound = 0
 read_interval = 2
+measure_field = 1
 tick_idle_interval = 3
 sensor_init = 0
 openhab_access = 0
@@ -45,11 +46,13 @@ days_in_month = 0
 
 logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))# get an instance of the logger object this module will use
 
+
 @background.task
 def mqtt_loop():
-    while running:
-        mqtt_client.loop()
-        time.sleep(1)
+    mqtt_client.loop_start()
+    #while running:
+    #    mqtt_client.loop()
+    #    time.sleep(1)
         
 
 @background.task
@@ -124,6 +127,8 @@ def on_connect(client, userdata, flags, rc):
         if price_calculation :
             mqtt_client.publish(mqtt_topic+"/config/gas-price",config_json["gas_price"],2,True)
             mqtt_client.publish(mqtt_topic+"/config/gas-fee",config_json["gas_fee_month"],2,True)
+        subres = mqtt_client.subscribe(mqtt_topic+"/total", qos=0)
+        log("Subsrciption result "+str(subres))
     else:
         log("Failed to connect, return code %d\n", rc)
 
@@ -136,13 +141,63 @@ def on_log(client, userdata, level, buf):
 
 #define callbacks
 def on_message(client, userdata, message):
-  print("received message =",str(message.payload.decode("utf-8")))
+    payload = str(message.payload.decode("utf-8"))
+    log("message received  " + payload +" topic" + message.topic)
+    if(message.topic == mqtt_topic+"/total"):
+        total_counter_received = int(payload)
+        if(total_counter_received != data_json["total"]):
+            delta = total_counter_received - data_json["total"]
+            log("Received different total count, delta " + str(delta))
+            data_json["total"] = total_counter_received
+            data_json["day"]["count"] += delta
+            data_json["month"]["count"] += delta
+            data_json["year"]["count"] += delta
+        else:
+            log("Received same total count")
+    
 
 def on_publish(client,userdata,result):
     log("data published "+str(result))
     pass
 
+def on_subscribe(client, userdata, mid, granted_qos):
+    log("subscribe feedback "+str(mid))
 
+# Sensor initialization
+def sensor_initialization():
+    global sensor_init
+    while sensor_init == 0:
+	    try:
+		    sensor = py_qmc5883l.QMC5883L(output_range=py_qmc5883l.RNG_8G)
+		    sensor_init = 1
+		    log("Sensor init done")
+		    # print("Sensor init done")
+	    except OSError as error:
+		    log(error)
+		    time.sleep(5)
+    return sensor
+
+# handle passed arguments
+if len(sys.argv) > 1:
+    if(str(sys.argv[1]) == "help"):
+        print("Usage")
+        print("help - this information")
+        print("setup - test magnetic sensor data")
+        sys.exit(0)        
+    if(str(sys.argv[1]) == "setup"):
+        sensor = sensor_initialization()
+        while True:
+            try:
+                m = sensor.get_data()
+                print(str(datetime.today()) +" "+str(m))
+                time.sleep(1)
+            except Exception as e:
+                print(str(e))
+                print("sleep and continue")
+                time.sleep(1)
+                # continue
+        sys.exit(0)        
+        
 # program start
 last_sensor_date = datetime.today().date()
 
@@ -181,8 +236,9 @@ data_json = json.loads(data_file.read())
 log(data_json)
 
 # set values for device driver
-normal = config_json["device_value_idle"]
-hysteresis = config_json["device_value_hysteresis"]
+device_measure_field = config_json["device_measure_field"]
+upper_bound = config_json["device_upper_bound"]
+lower_bound = config_json["device_lower_bound"]
 
 
 # MQTT Client setup
@@ -191,6 +247,9 @@ mqtt_topic = config_json["mqtt_topic"]
 #mqtt_client.on_publish = on_publish
 mqtt_client.on_connect = on_connect
 mqtt_client.on_disconnect = on_disconnect
+mqtt_client.on_message = on_message
+mqtt_client.on_subscribe = on_subscribe
+
 
 if config_json["mqtt_user"] : 
     mqtt_client.username_pw_set(config_json["mqtt_user"],config_json["mqtt_pwd"])
@@ -202,17 +261,7 @@ running = True
 mqtt_loop()
 mqtt_connect()
 
-# Sensor initialization
-while sensor_init == 0:
-	try:
-		sensor = py_qmc5883l.QMC5883L(output_range=py_qmc5883l.RNG_8G)
-		sensor_init = 1
-		log("Sensor init done")
-		# print("Sensor init done")
-	except OSError as error:
-		log(error)
-		time.sleep(5)
-
+sensor = sensor_initialization()
 
 # Start measure
 ticks = 0
@@ -224,7 +273,7 @@ try :
             m = sensor.get_data()
             read_success += 1
             ticks += 1
-            if m[1] < normal - hysteresis:
+            if m[device_measure_field] < lower_bound:
                 if state == "init":
                     state = "count"
                 if state == "idle":
@@ -240,7 +289,7 @@ try :
                         counter_changed = True
                     else:
                         log("Reject count due to short timeframe " + str(ticks_between))
-            if m[1] > normal:
+            if m[device_measure_field] > upper_bound:
                 if state == "init":
                     state = "idle"
                 if state == "count":
@@ -305,13 +354,15 @@ try :
   
 # catches nearly all possible exceptions      
 except Exception as e:
-    log(traceback.format_exc())
+    log(str(e))
 
 # in case of fall through to this point: stop event loop and write current data into file
 finally :
     log("final exit")
     running = False
+    mqtt_client.loop_stop()
     
 log("normal exit")
 running = False
+mqtt_client.loop_stop()
 
