@@ -61,7 +61,7 @@ smartmeter_gas.py help
 
 ### Configuration
 
-Stored in json file in the same directoy as the python script. Basically three sections needs to be configured:
+Configuration is stored in ```config.json```  in the same directoy as the python script. Basically three sections needs to be configured:
 * hardware configuration of values which shall trigger a count
 * MQTT configuration to distribute data
 * some technical data from your gas bill to calculate kwh consumption and pricing 
@@ -91,7 +91,7 @@ Figure out your device settings running the script with parameter *setup*
 smartmeter_gas.py setup
 ```
 
-Each second a log output is given with the current measured values. Find a time slot when gas is consumed. The example in the picture below is showing the changes during consumption - values are going down from approx *1000* to *-4000*. If you record such a cycle you can derive your config
+Each second a log output is given with the current measured values. Find a time slot when gas is consumed. The example in the picture below is showing the changes during consumption - values are going down from approx *1000* to *-4000* and up again. Record such a cycle and derive your config
 * ```device_measure_field``` - column of the desired measurement (green)
 * ```device_upper_bound``` - value to enter state *count* (blue)
 * ```device_lower_bound``` - value to exit state *count* (orange)
@@ -120,9 +120,9 @@ I use [MQTT Explorer](http://mqtt-explorer.com/) to check my IoT devices. You'll
 
 ### Data / Config Changes 
 
-The kwh and price values of the configuration can be changed with a simple *publish* call e.g. using the [MQTT Explorer](http://mqtt-explorer.com/). So if you receiv a new bill adapt the new values and publish them - no software restart necessary.
+The kwh and price values of the configuration can be changed with a simple *publish* call e.g. using the [MQTT Explorer](http://mqtt-explorer.com/). So if you receive a new bill adapt the new values and publish them - no software restart necessary.
 
-It's also possible due to some miscounting or device errors the reported total counter and the *real* measured counter diverges. From time to time please check manually the counter. If the number from this smartmeter doesn't match simply publish the correct counter value - no software restart necessary.
+It's also possible due to some miscounting or device errors the reported total counter and the *real* measured counter diverges. From time to time check the counter manually. If the number from this smartmeter doesn't match simply publish the correct counter value - no software restart necessary.
 
 # Going further
 
