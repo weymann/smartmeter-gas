@@ -2,7 +2,7 @@
 
 If you have an *old-style* gasmeter to measure gas consumption it's still possible to turn it into a smart device.
 
-<img src="./doc/gas-measure.png" style="margin-right: 10px;width: 640px;" />
+<img src="./doc/gas-measure.png" style="margin-right: 10px;width: 800px;" />
 
 ## Pre-conditions
 
@@ -96,7 +96,7 @@ Each second a log output is given with the current measured values. Find a time 
 * ```device_upper_bound``` - value to enter state *count* (blue)
 * ```device_lower_bound``` - value to exit state *count* (orange)
 
-<img src="./doc/device-config.png" style="margin-right: 10px;width: 640px;" />
+<img src="./doc/device-config.png" style="margin-right: 10px;width: 800px;" />
 
 #### Kwh / Price
 
@@ -104,7 +104,7 @@ In order to calculate kwh consumption and a corresponding price take your latest
 
 Pricing should be found in your bill. Prices in the below german example are ex vat so you need add the tax rate in order to get the paying price.
 
-<img src="./doc/price-config.png" style="margin-right: 10px;width: 640px;" />
+<img src="./doc/price-config.png" style="margin-right: 10px;width: 800px;" />
 
 #### MQTT
 
@@ -112,11 +112,37 @@ You should be aware of your mqtt settings.
 If not encrypted change the ```mqtt_port``` to 1883 and leave the ```cert_location``` empty. 
 If even anonymous is allowed leave ```mqtt_user``` and ```mqtt_pwd``` empty.
 
-### Check Data
+### Provided Values
 
-I use [MQTT Explorer](http://mqtt-explorer.com/) to check my IoT devices. You'll see the current values in the left tree and on the right side history for the selected topic is found.
+Use e.g. [MQTT Explorer](http://mqtt-explorer.com/) to check my IoT devices. You'll see the current values in the left tree and on the right side history for the selected topic is found.
 
-<img src="./doc/MQTTExplorer.png" style="margin-right: 10px;width: 640px;" />
+<img src="./doc/mqtt-data.png" style="margin-right: 10px;width: 800px;" />
+
+This screenshot shows already the provided values.
+Below table gives more details
+* Prefix Topic is given in configuration. 
+* Values marked with *Write* can be overwritten with *publish*.
+
+| Sub-topic    | Name          | Write | Description                                                      |
+|--------------|---------------|-------|------------------------------------------------------------------|
+| /            | total         |   X   | total gas count in dm<sup>3</sup> this should match to the origin counter  |
+| /            | timestamp     |       | timestamp of last measurement                                    |
+| /            | success-rate  |       | daily read success rate of the magnetic sensor                   |
+| /config      | heating-value |   X   | heating value from your gas bill                                 |
+| /config      | z-number      |   X   | Z-number from your gas bill                                      |
+| /config      | gas-price     |   X   | kwh gas price from your bill                                     |
+| /config      | gas-fee       |   X   | monthly fee from your gas bill                                   |
+| /day         | count         |       | daily gas consumption in dm<sup>3</                              |
+| /day         | kwh           |       | daily gas consumption in                                         |
+| /day         | price         |       | daily price incl. partial fee                                    |
+| /month       | count         |       | monthly gas consumption in dm<sup>3</sup>                        |
+| /month       | kwh           |       | monthly gas consumption in kwh                                   |
+| /month       | price         |       | monthly price incl. monthly fee                                  |
+| /year        | count         |       | yearly gas consumption in dm<sup>3</sup>                         |
+| /year        | kwh           |       | yearly gas consumption in kwh                                    |
+| /year        | price         |       | yearly price incl. monthly fees till today                       |
+
+Values from *day / month / year* are published in *yesterday / previous-month / previous-year* after the timeframe ended.
 
 ### Data / Config Changes 
 
@@ -130,4 +156,4 @@ Great! You turned an old fashioned gas meter which needs to be checked manually 
 
 Use now your data and put it into your favorite Smarthome Software. I use [openHAB](https://www.openhab.org/) which provides the capability to receive MQTT data.
 
-<img src="./doc/openHAB-Panel.png" style=" margin-right: 10px;width: 640px;" />
+<img src="./doc/openHAB-Panel.png" style=" margin-right: 10px;width: 800px;" />
