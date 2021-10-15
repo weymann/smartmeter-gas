@@ -16,16 +16,13 @@ from datetime import date
 from calendar import monthrange
 from systemd.journal import JournaldLogHandler
 
-host = ""
+host = ''
 token = ''
 upper_bound = 0
 lower_bound = 0
-read_interval = 2
-measure_field = 1
-tick_idle_interval = 3
+read_interval = 1
 sensor_init = 0
-openhab_access = 0
-state = "init"
+state = 'init'
 loop_counter = 1
 loop_time = 60
 read_success = 0
@@ -73,23 +70,31 @@ def publish():
             mqtt_client.publish(mqtt_topic+"/year/kwh-hc", round(hc_load * kwh_factor,3),2,True)
     
     if price_calculation :
+        # breakdown gas fee to daily share
+        day_gas_price = data_json["day"]["count"] * price_factor
+        day_fee = config_json["gas_fee_month"] / days_in_month
+        mqtt_client.publish(mqtt_topic+"/day/price", round(day_gas_price + day_fee, 2) ,2, True)
+        mqtt_client.publish(mqtt_topic+"/day/price-gas",  round(day_gas_price, 2) ,2, True)
+        mqtt_client.publish(mqtt_topic+"/day/price-fee",  round(day_fee, 2) ,2, True)
+
+        month_gas_price = data_json["month"]["count"] * price_factor
+        month_fee = config_json["gas_fee_month"]
+        mqtt_client.publish(mqtt_topic+"/month/price", round( month_gas_price + month_fee,2),2,True)
+        mqtt_client.publish(mqtt_topic+"/month/price-gas",  round(month_gas_price, 2) ,2, True)
+        mqtt_client.publish(mqtt_topic+"/month/price-fee",  round(month_fee, 2) ,2, True)
+
+        year_price = data_json["year"]["price-gas"] + data_json["year"]["price-fee"]
+        mqtt_client.publish(mqtt_topic+"/year/price", round(year_price,2),2,True)
+        mqtt_client.publish(mqtt_topic+"/year/price-gas", round(data_json["year"]["price-gas"], 2) ,2, True)
+        mqtt_client.publish(mqtt_topic+"/year/price-fee", round(data_json["year"]["price-fee"],2),2,True)
+
         # EXPERIMENTAL: for year split price into heating water circle (hwc), heating circle (hc) and fees
         if data_json["hwc-baseload"]:
             hwc_baseload = last_sensor_date.month * data_json["hwc-baseload"]
             hc_load = data_json["year"]["count"] - hwc_baseload
             mqtt_client.publish(mqtt_topic+"/year/price-hwc", round(hwc_baseload * price_factor,2),2,True)
             mqtt_client.publish(mqtt_topic+"/year/price-hc", round(hc_load * price_factor,2),2,True)
-        if config_json["gas_fee_month"] :
-            # breakdown gas fee to daily share
-            mqtt_client.publish(mqtt_topic+"/day/price", round(data_json["day"]["count"] * price_factor + config_json["gas_fee_month"] / days_in_month,2))
-            mqtt_client.publish(mqtt_topic+"/month/price", round(data_json["month"]["count"] * price_factor + config_json["gas_fee_month"],2),2,True)
-            mqtt_client.publish(mqtt_topic+"/year/price", round(data_json["year"]["count"] * price_factor + config_json["gas_fee_month"] * last_sensor_date.month,2),2,True)
-            mqtt_client.publish(mqtt_topic+"/year/fees", round(config_json["gas_fee_month"] * last_sensor_date.month,2),2,True)
-        else :
-            mqtt_client.publish(mqtt_topic+"/day/price", round(data_json["day"]["count"] * price_factor,2))
-            mqtt_client.publish(mqtt_topic+"/month/price", round(data_json["month"]["count"] * price_factor,2),2,True)
-            mqtt_client.publish(mqtt_topic+"/year/price", round(data_json["year"]["count"] * price_factor,2),2,True)
-    
+   
     return tc_result[0]
 
 # write current measured data into file
@@ -155,6 +160,8 @@ def on_message(client, userdata, message):
             data_json["day"]["count"] += delta
             data_json["month"]["count"] += delta
             data_json["year"]["count"] += delta
+            if price_calculation:
+                data_json["year"]["price-gas"] += delta * price_factor
             write_data()
     elif message.topic.startswith(mqtt_topic+"/config") :
         try:
@@ -281,40 +288,42 @@ mqtt_connect()
 sensor = sensor_initialization()
 
 # Start measure
-ticks = 0
 last_count_tick = -10
+measure_values = []
 try :
     counter_changed = False
     while True:
+        read_error = False
         try:
             m = sensor.get_data()
+            measure_values.append(m[device_measure_field])
+            if len(measure_values) > 25:
+                del measure_values[0]
             read_success += 1
-            ticks += 1
             if m[device_measure_field] < lower_bound:
                 if state == "init":
                     state = "count"
                 if state == "idle":
-                    ticks_between = ticks - last_count_tick
-                    if(ticks_between > tick_idle_interval):
-                        state = "count"
-                        log("Count start at " + str(m))
-                        data_json["day"]["count"] += 10
-                        data_json["month"]["count"] += 10
-                        data_json["year"]["count"] += 10
-                        data_json["total"] += 10
-                        last_count_tick = ticks
-                        counter_changed = True
-                    else:
-                        log("Reject count due to short timeframe " + str(ticks_between))
+                    state = "count"
+                    log("Count start at " + str(measure_values))
+                    data_json["day"]["count"] += 10
+                    data_json["month"]["count"] += 10
+                    data_json["year"]["count"] += 10
+                    # due to possible gas / fee price changes during the year the values 
+                    # are calculated directly in the counter
+                    if price_calculation:
+                        data_json["year"]["price-gas"] += 10 * price_factor
+                    data_json["total"] += 10
+                    counter_changed = True
             if m[device_measure_field] > upper_bound:
                 if state == "init":
                     state = "idle"
                 if state == "count":
-                    log("Count end at   " +str(m))
+                    log("Count end at   " + str(measure_values))
                     state = "idle"
-                    last_count_tick = ticks
         except OSError as error:
             log(error)
+            read_error = True
             read_fail += 1 
                          
         if loop_counter >= loop_time:
@@ -341,6 +350,7 @@ try :
                             mqtt_client.publish(mqtt_topic+"/previous-month/price", round(data_json["month"]["count"] * price_factor,2),2,True)
                     days_in_month = monthrange(tod.year, tod.month)[1]
                     data_json["month"]["count"] = 0
+                    data_json["year"]["price-fee"] += config_json["gas_fee_month"]
                     
                     if(last_sensor_date.year != tod.year) :
                         log("Year Switch")
@@ -350,27 +360,39 @@ try :
                             if price_calculation :
                                 mqtt_client.publish(mqtt_topic+"/previous-year/price", round(data_json["year"]["count"] * price_factor,2),2,True)
                         data_json["year"]["count"] = 0
+                        data_json["year"]["price"] = 0
+                        data_json["year"]["price-gas"] = 0
+                        data_json["year"]["price-fee"] = config_json["gas_fee_month"]
             
             last_sensor_date = datetime.today().date()
             if read_success == 0:
                 data_json["sucess_rate"] = 0.0
             else:
                 data_json["sucess_rate"] = round(100.0 - (float(read_fail) * 100 / float(read_success)),1)
-    
+
+            begin_publish = time.perf_counter_ns()
             if counter_changed :
                 write_data()
                 counter_changed = False
 
-            # in case of unsuccessful publish try to reconnect
             publish_result = publish() 
+            # in case of unsuccessful publish try to reconnect
             if publish_result != 0:
                 log("Publish failed "+str(publish_result))
                 mqtt_connect()
             loop_counter = 1
-    	# increase loop counter and sleep
-        loop_counter = loop_counter + read_interval
-        time.sleep(read_interval)
-  
+            end_publish = time.perf_counter_ns()
+            duration = end_publish - begin_publish
+            log("Publish took " + str(duration / 1000000) + "ms")
+    	
+        # increase loop counter and sleep for interval in case of successful read
+        # otherwise wait only 100 ms
+        if not read_error:
+            loop_counter += read_interval
+            time.sleep(read_interval)
+        else:
+            time.sleep(0.1)
+
 # catches nearly all possible exceptions      
 except Exception as e:
     log(str(e))
