@@ -163,7 +163,7 @@ def on_connect(client, userdata, flags, rc):
     else:
         log("Failed to connect, return code %d", rc)
 
-def on_disconnect(client, userdata, flags, rc):
+def on_disconnect(client, userdata, rc):
 	global mqtt_connected
 	mqtt_connected = False
 
