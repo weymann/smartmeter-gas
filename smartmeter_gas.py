@@ -14,7 +14,6 @@ import time
 from datetime import datetime
 from datetime import date
 from calendar import monthrange
-from systemd.journal import JournaldLogHandler
 
 host = ''
 token = ''
@@ -30,7 +29,7 @@ read_fail = 0
 success_rate = 0.0
 execution_path = ""
 mqtt_connected = False
-mqtt_client = mqtt.Client(client_id='SmartmeterGas', clean_session=True, userdata=None, protocol=mqtt.MQTTv311, transport="tcp")
+mqtt_client = None
 mqtt_topic = ""
 kwh_calculation = False
 kwh_factor = 0
@@ -42,8 +41,28 @@ logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))# get an instance o
 
 
 def mqtt_connect():
-  log("MQTT Client connect")
-  mqtt_client.connect(config_json["mqtt_server"],config_json["mqtt_port"])
+    log("MQTT Client connect")
+    global mqtt_client
+    global mqtt_topic
+    mqtt_client = mqtt.Client(client_id='SmartmeterGas', clean_session=True, userdata=None, protocol=mqtt.MQTTv311, transport="tcp")
+    # MQTT Client setup
+    mqtt_topic = config_json["mqtt_topic"]
+    #mqtt_client.on_log = on_log
+    mqtt_client.on_connect = on_connect
+    mqtt_client.on_disconnect = on_disconnect
+    mqtt_client.on_message = on_message
+    mqtt_client.on_subscribe = on_subscribe
+    # mqtt_client.on_publish = on_publish
+
+
+    if config_json["mqtt_user"] : 
+        mqtt_client.username_pw_set(config_json["mqtt_user"],config_json["mqtt_pwd"])
+    if config_json["cert_location"] :
+        mqtt_client.tls_set(config_json["cert_location"], tls_version=ssl.PROTOCOL_TLS)
+
+    # start event loop in background task and connect client
+    mqtt_client.loop_start()   
+    mqtt_client.connect(config_json["mqtt_server"],config_json["mqtt_port"])
 
 def publish():
     # log("Publish Connected? "+str(mqtt_connected)+", Total: " + str(data_json["total"]))
@@ -132,12 +151,17 @@ def on_connect(client, userdata, flags, rc):
             mqtt_client.publish(mqtt_topic+"/config/gas-price",config_json["gas_price"],2,True)
             mqtt_client.publish(mqtt_topic+"/config/gas-fee",config_json["gas_fee_month"],2,True)
 
-        # subscribe for changes of total counter and config
+        # Before subscribing to "total counter" publish the last value from data file
+        # otherwise retained "old" value uis posted and measurement is 
+        log("Publish total " + str(data_json["total"]))        
+        rc = mqtt_client.publish(mqtt_topic+"/total", data_json["total"],2,True) 
+        log("Publish return code: "+str(rc))
+        # subscribe for changes of "total counter" and config
         mqtt_client.subscribe(mqtt_topic+"/total", qos=0)
         mqtt_client.subscribe(mqtt_topic+"/config/#", qos=0)
         
     else:
-        log("Failed to connect, return code %d\n", rc)
+        log("Failed to connect, return code %d", rc)
 
 def on_disconnect(client, userdata, flags, rc):
 	global mqtt_connected
@@ -145,6 +169,9 @@ def on_disconnect(client, userdata, flags, rc):
 
 def on_log(client, userdata, level, buf):
     logging.info(buf)
+
+#def on_publish(client, userdata, mid):
+#    log("on_publish: " + str(client) + " / " + str(userdata) + " / " + str(mid))
 
 #define callbacks
 def on_message(client, userdata, message):
@@ -267,22 +294,6 @@ upper_bound = config_json["device_upper_bound"]
 lower_bound = config_json["device_lower_bound"]
 
 
-# MQTT Client setup
-mqtt_topic = config_json["mqtt_topic"]
-#mqtt_client.on_log = on_log
-mqtt_client.on_connect = on_connect
-mqtt_client.on_disconnect = on_disconnect
-mqtt_client.on_message = on_message
-mqtt_client.on_subscribe = on_subscribe
-
-
-if config_json["mqtt_user"] : 
-    mqtt_client.username_pw_set(config_json["mqtt_user"],config_json["mqtt_pwd"])
-if config_json["cert_location"] :
-    mqtt_client.tls_set(config_json["cert_location"], tls_version=ssl.PROTOCOL_TLS)
-
-# start event loop in background task and connect client
-mqtt_client.loop_start()
 mqtt_connect()
 
 sensor = sensor_initialization()
@@ -290,10 +301,13 @@ sensor = sensor_initialization()
 # Start measure
 last_count_tick = -10
 measure_values = []
+# catch anything during execution for clean finish
+# e.g. Keyboard interrupt
 try :
     counter_changed = False
     while True:
         read_error = False
+        # catch device errors
         try:
             m = sensor.get_data()
             measure_values.append(m[device_measure_field])
@@ -322,7 +336,7 @@ try :
                     log("Count end at   " + str(measure_values))
                     state = "idle"
         except OSError as error:
-            log(error)
+            # log(error)
             read_error = True
             read_fail += 1 
                          
@@ -331,6 +345,8 @@ try :
             tod = datetime.today().date()
             if(last_sensor_date.day != tod.day) :
                 log("Day Switch")
+                # fresh connection each day
+                mqtt_connect()
                 mqtt_client.publish(mqtt_topic+"/yesterday/count", data_json["day"]["count"],2,True)
                 if kwh_calculation :
                     mqtt_client.publish(mqtt_topic+"/yesterday/kwh", round(data_json["day"]["count"] * kwh_factor,3),2,True)
@@ -382,8 +398,12 @@ try :
                 mqtt_connect()
             loop_counter = 1
             end_publish = time.perf_counter_ns()
-            duration = end_publish - begin_publish
-            log("Publish took " + str(duration / 1000000) + "ms")
+
+            # calculate duration in ms
+            # if publish takes more than 50 ms log entry is added
+            duration = (end_publish - begin_publish) / 1000000
+            if duration > 50:
+                log("Publish took " + str(duration) + "ms")
     	
         # increase loop counter and sleep for interval in case of successful read
         # otherwise wait only 100 ms
