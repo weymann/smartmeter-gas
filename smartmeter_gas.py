@@ -66,14 +66,22 @@ def mqtt_connect():
 
 def publish():
     # log("Publish Connected? "+str(mqtt_connected)+", Total: " + str(data_json["total"]))
+    global mqtt_connected
     if not(mqtt_connected):
         mqtt_connect()
            	
-    mqtt_client.publish(mqtt_topic+"/timestamp",datetime.now().isoformat(),2,True)
-    mqtt_client.publish(mqtt_topic+"/success-rate",data_json["sucess_rate"],2,True)
     # pick total counter publish as total reult for this function
     # if it fails try to reconnect
     tc_result = mqtt_client.publish(mqtt_topic+"/total", data_json["total"],2,True)
+    if tc_result[0] == 0:
+        log("Publish failed "+str(tc_result))
+        mqtt_connected = False
+        # wait for next publish loop to reconnect
+        return
+
+    mqtt_client.publish(mqtt_topic+"/timestamp",datetime.now().isoformat(),2,True)
+    mqtt_client.publish(mqtt_topic+"/success-rate",data_json["sucess_rate"],2,True)
+
     mqtt_client.publish(mqtt_topic+"/day/count", data_json["day"]["count"],2,True)
     mqtt_client.publish(mqtt_topic+"/month/count",data_json["month"]["count"],2,True)
     mqtt_client.publish(mqtt_topic+"/year/count",data_json["year"]["count"],2,True)
@@ -113,8 +121,6 @@ def publish():
             hc_load = data_json["year"]["count"] - hwc_baseload
             mqtt_client.publish(mqtt_topic+"/year/price-hwc", round(hwc_baseload * price_factor,2),2,True)
             mqtt_client.publish(mqtt_topic+"/year/price-hc", round(hc_load * price_factor,2),2,True)
-   
-    return tc_result[0]
 
 # write current measured data into file
 @background.task
@@ -391,11 +397,7 @@ try :
                 write_data()
                 counter_changed = False
 
-            publish_result = publish() 
-            # in case of unsuccessful publish try to reconnect
-            if publish_result != 0:
-                log("Publish failed "+str(publish_result))
-                mqtt_connect()
+            publish() 
             loop_counter = 1
             end_publish = time.perf_counter_ns()
 
