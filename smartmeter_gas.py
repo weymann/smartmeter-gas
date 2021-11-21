@@ -73,7 +73,7 @@ def publish():
     # pick total counter publish as total reult for this function
     # if it fails try to reconnect
     tc_result = mqtt_client.publish(mqtt_topic+"/total", data_json["total"],2,True)
-    if tc_result[0] == 0:
+    if tc_result[0] != 0:
         log("Publish failed "+str(tc_result))
         mqtt_connected = False
         # wait for next publish loop to reconnect
@@ -351,8 +351,6 @@ try :
             tod = datetime.today().date()
             if(last_sensor_date.day != tod.day) :
                 log("Day Switch")
-                # fresh connection each day
-                mqtt_connect()
                 mqtt_client.publish(mqtt_topic+"/yesterday/count", data_json["day"]["count"],2,True)
                 if kwh_calculation :
                     mqtt_client.publish(mqtt_topic+"/yesterday/kwh", round(data_json["day"]["count"] * kwh_factor,3),2,True)
@@ -398,8 +396,8 @@ try :
                 counter_changed = False
 
             publish() 
-            loop_counter = 1
             end_publish = time.perf_counter_ns()
+            loop_counter = 1
 
             # calculate duration in ms
             # if publish takes more than 50 ms log entry is added
@@ -408,7 +406,7 @@ try :
                 log("Publish took " + str(duration) + "ms")
     	
         # increase loop counter and sleep for interval in case of successful read
-        # otherwise wait only 100 ms
+        # otherwise wait only 100 ms for fast retry not to miss any count
         if not read_error:
             loop_counter += read_interval
             time.sleep(read_interval)
