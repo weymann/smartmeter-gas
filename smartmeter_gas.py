@@ -162,8 +162,8 @@ def on_connect(client, userdata, flags, rc):
         log("Publish total " + str(data_json["total"]))        
         rc = mqtt_client.publish(mqtt_topic+"/total", data_json["total"],2,True) 
         log("Publish return code: "+str(rc))
-        # subscribe for changes of "total counter" and config
-        mqtt_client.subscribe(mqtt_topic+"/total", qos=0)
+        # subscribe for changes of "total counter" set and config
+        mqtt_client.subscribe(mqtt_topic+"/total/set", qos=0)
         mqtt_client.subscribe(mqtt_topic+"/config/#", qos=0)
         
     else:
@@ -183,7 +183,8 @@ def on_log(client, userdata, level, buf):
 def on_message(client, userdata, message):
     payload = str(message.payload.decode("utf-8"))
     # log("message received  " + payload +" topic" + message.topic)
-    if message.topic == mqtt_topic+"/total" :
+    # listen to "set" sub-topic in order to change the total counter
+    if message.topic == mqtt_topic+"/total/set" :
         # adapt all values according new current counter setting
         total_counter_received = int(payload)
         if(total_counter_received != data_json["total"]):
