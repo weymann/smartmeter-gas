@@ -311,7 +311,7 @@ measure_values = []
 # catch anything during execution for clean finish
 # e.g. Keyboard interrupt
 try :
-    counter_changed = False
+    force_write = False
     while True:
         read_error = False
         # catch device errors
@@ -335,7 +335,7 @@ try :
                     if price_calculation:
                         data_json["year"]["price-gas"] += 10 * price_factor
                     data_json["total"] += 10
-                    counter_changed = True
+                    force_write = True
             if m[device_measure_field] > upper_bound:
                 if state == "init":
                     state = "idle"
@@ -358,6 +358,8 @@ try :
                     if price_calculation :
                         mqtt_client.publish(mqtt_topic+"/yesterday/price", round(data_json["day"]["count"] * price_factor,2),2,True)
                 data_json["day"]["count"] = 0
+                force_write = True
+                log("Day switch data "+str(data_json))
                 
                 # day reset of success counter
                 read_fail = 0
@@ -370,8 +372,11 @@ try :
                         if price_calculation :
                             mqtt_client.publish(mqtt_topic+"/previous-month/price", round(data_json["month"]["count"] * price_factor,2),2,True)
                     days_in_month = monthrange(tod.year, tod.month)[1]
+                    data_json["month"]["previous-month"] = data_json["month"]["count"]
                     data_json["month"]["count"] = 0
                     data_json["year"]["price-fee"] += config_json["gas_fee_month"]
+                    force_write = True
+                    log("Month switch data "+str(data_json))
                     
                     if(last_sensor_date.year != tod.year) :
                         log("Year Switch")
@@ -384,6 +389,8 @@ try :
                         data_json["year"]["price"] = 0
                         data_json["year"]["price-gas"] = 0
                         data_json["year"]["price-fee"] = config_json["gas_fee_month"]
+                        force_write = True
+                        log("Year switch data "+str(data_json))
             
             last_sensor_date = datetime.today().date()
             if read_success == 0:
@@ -392,9 +399,9 @@ try :
                 data_json["sucess_rate"] = round(100.0 - (float(read_fail) * 100 / float(read_success)),1)
 
             begin_publish = time.perf_counter_ns()
-            if counter_changed :
+            if force_write :
                 write_data()
-                counter_changed = False
+                force_write = False
 
             publish() 
             end_publish = time.perf_counter_ns()
