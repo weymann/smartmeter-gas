@@ -68,6 +68,7 @@ def publish():
     # log("Publish Connected? "+str(mqtt_connected)+", Total: " + str(data_json["total"]))
     global mqtt_connected
     if not(mqtt_connected):
+        log("MQTT not connected - try to reconnect")
         mqtt_connect()
            	
     # pick total counter publish as total reult for this function
@@ -145,29 +146,31 @@ def log(message):
 	logging.info(message)
 
 def on_connect(client, userdata, flags, rc):
+    global mqtt_connected
+    log("on_connect: Connected to MQTT Broker! " + str(mqtt_connected))
     if rc == 0:
-        global mqtt_connected
-        mqtt_connected = True
-        log("Connected to MQTT Broker! " + str(mqtt_connected))
-        # Publish config parameters which can be modified
-        if kwh_calculation:
-            mqtt_client.publish(mqtt_topic+"/config/heating-value", config_json["heating_value"],2,True)
-            mqtt_client.publish(mqtt_topic+"/config/z-number", config_json["z_number"],2,True)
-        if price_calculation :
-            mqtt_client.publish(mqtt_topic+"/config/gas-price",config_json["gas_price"],2,True)
-            mqtt_client.publish(mqtt_topic+"/config/gas-fee",config_json["gas_fee_month"],2,True)
+        if mqtt_connected == False:
+            mqtt_connected = True
+            # Publish config parameters which can be modified
+            if kwh_calculation:
+                mqtt_client.publish(mqtt_topic+"/config/heating-value", config_json["heating_value"],2,True)
+                mqtt_client.publish(mqtt_topic+"/config/z-number", config_json["z_number"],2,True)
+            if price_calculation :
+                mqtt_client.publish(mqtt_topic+"/config/gas-price",config_json["gas_price"],2,True)
+                mqtt_client.publish(mqtt_topic+"/config/gas-fee",config_json["gas_fee_month"],2,True)
 
-        # Before subscribing to "total counter" publish the last value from data file
-        # otherwise retained "old" value uis posted and measurement is 
-        log("Publish total " + str(data_json["total"]))        
-        rc = mqtt_client.publish(mqtt_topic+"/total", data_json["total"],2,True) 
-        log("Publish return code: "+str(rc))
-        # subscribe for changes of "total counter" set and config
-        mqtt_client.subscribe(mqtt_topic+"/total/set", qos=0)
-        mqtt_client.subscribe(mqtt_topic+"/config/#", qos=0)
-        
+            # Before subscribing to "total counter" publish the last value from data file
+            # otherwise retained "old" value uis posted and measurement is 
+            log("Publish total " + str(data_json["total"]))        
+            rc = mqtt_client.publish(mqtt_topic+"/total", data_json["total"],2,True) 
+            log("Publish return code: " + str(rc))
+            # subscribe for changes of "total counter" set and config
+            mqtt_client.subscribe(mqtt_topic+"/total/set", qos=0)
+            mqtt_client.subscribe(mqtt_topic+"/config/#", qos=0)
+        else:        
+            log("Already connected - no action required")
     else:
-        log("Failed to connect, return code %d", rc)
+        log("Failed to connect, return code " + str(rc))
 
 def on_disconnect(client, userdata, rc):
 	global mqtt_connected
@@ -352,39 +355,25 @@ try :
             tod = datetime.today().date()
             if(last_sensor_date.day != tod.day) :
                 log("Day Switch")
-                mqtt_client.publish(mqtt_topic+"/yesterday/count", data_json["day"]["count"],2,True)
-                if kwh_calculation :
-                    mqtt_client.publish(mqtt_topic+"/yesterday/kwh", round(data_json["day"]["count"] * kwh_factor,3),2,True)
-                    if price_calculation :
-                        mqtt_client.publish(mqtt_topic+"/yesterday/price", round(data_json["day"]["count"] * price_factor,2),2,True)
                 data_json["day"]["count"] = 0
                 force_write = True
                 log("Day switch data "+str(data_json))
-                
                 # day reset of success counter
                 read_fail = 0
                 read_success = 0
+
+                # month switch
                 if(last_sensor_date.month != tod.month) :
                     log("Month Switch")
-                    mqtt_client.publish(mqtt_topic+"/previous-month/count", data_json["month"]["count"],2,True)
-                    if kwh_calculation :
-                        mqtt_client.publish(mqtt_topic+"/previous-month/kwh", round(data_json["month"]["count"] * kwh_factor,3),2,True)
-                        if price_calculation :
-                            mqtt_client.publish(mqtt_topic+"/previous-month/price", round(data_json["month"]["count"] * price_factor,2),2,True)
                     days_in_month = monthrange(tod.year, tod.month)[1]
-                    data_json["month"]["previous-month"] = data_json["month"]["count"]
                     data_json["month"]["count"] = 0
                     data_json["year"]["price-fee"] += config_json["gas_fee_month"]
                     force_write = True
                     log("Month switch data "+str(data_json))
                     
+                    # year switch
                     if(last_sensor_date.year != tod.year) :
                         log("Year Switch")
-                        mqtt_client.publish(mqtt_topic+"/previous-year/count", data_json["year"]["count"],2,True)
-                        if kwh_calculation :
-                            mqtt_client.publish(mqtt_topic+"/previous-year/kwh", round(data_json["year"]["count"] * kwh_factor,3),2,True)
-                            if price_calculation :
-                                mqtt_client.publish(mqtt_topic+"/previous-year/price", round(data_json["year"]["count"] * price_factor,2),2,True)
                         data_json["year"]["count"] = 0
                         data_json["year"]["price"] = 0
                         data_json["year"]["price-gas"] = 0
