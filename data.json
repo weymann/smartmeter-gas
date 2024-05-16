@@ -1,1 +1,23 @@
-{"day": {"count": 0}, "month": {"count": 6510}, "year": {"count": 414130}, "total": 711130, "yesterday": {"count": 570}, "previous-month": {}, "previous-year": {"count": 594000}, "sucess_rate": 96.9}
+{
+	"day": {
+		"count": 0,
+		"price-gas": 0,
+		"price-fee": 0,
+		"price": 0
+	},
+	"month": {
+		"count": 0,
+		"price-gas": 0,
+		"price-fee": 0,
+		"price": 0
+	},
+	"year": {
+		"count": 0,
+		"price-gas": 0,
+		"price-fee": 0,
+		"price": 0
+	},
+	"hwc-baseload": 33,
+	"total": 0,
+	"success_rate": 0
+}

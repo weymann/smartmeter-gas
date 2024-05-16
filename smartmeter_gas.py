@@ -36,6 +36,8 @@ kwh_factor = 0
 price_calculation = False
 price_factor = 0
 days_in_month = 0
+actual_count = 0
+actual_kwh = 0
 
 logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))# get an instance of the logger object this module will use
 
@@ -81,15 +83,17 @@ def publish():
         return
 
     mqtt_client.publish(mqtt_topic+"/timestamp",datetime.now().isoformat(),2,True)
-    mqtt_client.publish(mqtt_topic+"/success-rate",data_json["sucess_rate"],2,True)
+    mqtt_client.publish(mqtt_topic+"/success-rate",data_json["success_rate"],2,True)
 
     mqtt_client.publish(mqtt_topic+"/day/count", data_json["day"]["count"],2,True)
     mqtt_client.publish(mqtt_topic+"/month/count",data_json["month"]["count"],2,True)
     mqtt_client.publish(mqtt_topic+"/year/count",data_json["year"]["count"],2,True)
+    mqtt_client.publish(mqtt_topic+"/actual/count",actual_count,2,True)
     if kwh_calculation :
         mqtt_client.publish(mqtt_topic+"/day/kwh", round(data_json["day"]["count"] * kwh_factor,3),2,True)
         mqtt_client.publish(mqtt_topic+"/month/kwh", round(data_json["month"]["count"] * kwh_factor,3),2,True)
         mqtt_client.publish(mqtt_topic+"/year/kwh", round(data_json["year"]["count"] * kwh_factor,3),2,True)
+        mqtt_client.publish(mqtt_topic+"/actual/kwh",round(actual_count * kwh_factor,3),2,True)
         # EXPERIMENTAL: for year split price into heating water circle (hwc), heating circle (hc) and fees
         if data_json["hwc-baseload"]:
             hwc_baseload = last_sensor_date.month * data_json["hwc-baseload"]
@@ -333,6 +337,7 @@ try :
                     data_json["day"]["count"] += 10
                     data_json["month"]["count"] += 10
                     data_json["year"]["count"] += 10
+                    actual_count += 10
                     # due to possible gas / fee price changes during the year the values 
                     # are calculated directly in the counter
                     if price_calculation:
@@ -383,9 +388,9 @@ try :
             
             last_sensor_date = datetime.today().date()
             if read_success == 0:
-                data_json["sucess_rate"] = 0.0
+                data_json["success_rate"] = 0.0
             else:
-                data_json["sucess_rate"] = round(100.0 - (float(read_fail) * 100 / float(read_success)),1)
+                data_json["success_rate"] = round(100.0 - (float(read_fail) * 100 / float(read_success)),1)
 
             begin_publish = time.perf_counter_ns()
             if force_write :
@@ -395,7 +400,7 @@ try :
             publish() 
             end_publish = time.perf_counter_ns()
             loop_counter = 1
-
+            actual_count = 0
             # calculate duration in ms
             # if publish takes more than 50 ms log entry is added
             duration = (end_publish - begin_publish) / 1000000
