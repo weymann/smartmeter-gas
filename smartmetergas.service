@@ -1,0 +1,12 @@
+[Unit]
+Description=Smartmeter Gas
+After=network.target
+StartLimitIntervalSec=0
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+ExecStart=/etc/openhab/scripts/smartmeter/smartmeter.sh
+
+[Install]
+WantedBy=multi-user.target
